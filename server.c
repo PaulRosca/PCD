@@ -1,4 +1,6 @@
+#include "operations.h"
 #include <arpa/inet.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -7,6 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
@@ -18,9 +22,55 @@ pthread_t admin_thread, client_thread, web_thread, processing_thread;
 struct orders {
   unsigned long long order_number;
   uuid_t client_id;
-  short operation;
+  unsigned short operation;
+  char argument[64];
   struct orders *next;
-} * front_order, *back_order, *front_finished, *back_finished;
+} * front_pending, *back_pending, *front_finished, *back_finished;
+
+pthread_mutex_t pending_queue;
+
+int is_empty(struct orders *front) { return front == NULL; };
+
+void enqueue_order(struct orders* new_order) {
+  new_order->next = NULL;
+  if (is_empty(front_pending)) {
+    new_order->order_number = 0;
+    front_pending = new_order;
+    back_pending = front_pending;
+  } else {
+    new_order->order_number = back_pending->order_number + 1;
+    back_pending->next = new_order;
+    back_pending = new_order;
+  }
+};
+
+void add_to_finished(struct orders *order) {
+  order->next = NULL;
+  if (is_empty(front_finished)) {
+    front_finished = order;
+    back_finished = front_finished;
+  } else {
+    back_finished->next = order;
+    back_finished = order;
+  }
+}
+
+struct orders *dequeue(struct orders **front) {
+  struct orders *order = NULL;
+  if (!is_empty(*front)) {
+    order = *front;
+    *front = (*front)->next;
+  }
+  return order;
+};
+
+void print_queue(struct orders *front) {
+  while (front != NULL) {
+    printf("Order no:%llu, client_id: %s, op: %d argument: %s\n", front->order_number,
+           front->client_id, front->operation, front->argument);
+    front = front->next;
+  }
+}
 
 void write_bytes(int fd, void *buff, size_t size) {
   size_t bytes_left = size;
@@ -43,7 +93,7 @@ void read_bytes(int fd, void *buff, size_t size) {
 };
 
 int recieve_file(int sfd, size_t filesize) {
-  int fp = open("request.webp", O_WRONLY | O_CREAT);
+  int fp = open("request.webp", O_WRONLY | O_CREAT, 0666);
   if (fp < 0) {
     printf("Error opening file!\n");
     return -1;
@@ -54,8 +104,8 @@ int recieve_file(int sfd, size_t filesize) {
   char buff[1024];
   while (bytes_left > 0) {
     bytes_read = read(sfd, buff, 1024 > bytes_left ? bytes_left : 1024);
-    printf("READ: %s\n", buff);
-    printf("BYTES_READ: %lu\n",bytes_read);
+    /* printf("READ: %s\n", buff); */
+    /* printf("BYTES_READ: %lu\n",bytes_read); */
     write_bytes(fp, buff, bytes_read);
     bytes_left -= bytes_read;
     bzero(buff, 1024);
@@ -64,6 +114,35 @@ int recieve_file(int sfd, size_t filesize) {
   close(fp);
   return total_read_bytes;
 };
+
+struct orders *recieve_processing_request(int i) {
+  struct orders *order = NULL;
+  uuid_t client_id;
+  bzero(client_id, 16);
+  unsigned long filesize = 0;
+  unsigned short op;
+  char arg[64];
+  char ext[6];
+  if (read(i, &client_id, 1) <= 0) {
+    return order;
+  }
+  read_bytes(i, &client_id[1], 15);
+  printf("From client UUID: %s\n", client_id);
+  read_bytes(i, &op, 2);
+  printf("From client Operation: %d\n", op);
+  read_bytes(i, &arg, 64);
+  printf("From client argument: %s\n", arg);
+  read_bytes(i, &filesize, 8);
+  printf("From client FS: %lu\n", filesize);
+  read_bytes(i, ext, 6);
+  printf("From client FE: %s\n", ext);
+  printf("File size read: %d\n", recieve_file(i, filesize));
+  order = malloc(sizeof(struct orders));
+  memcpy(order->client_id, client_id, 16);
+  order->operation = op;
+  strncpy(order->argument, arg, 64);
+  return order;
+}
 
 void *admin_func(void *arg) { return NULL; };
 
@@ -81,6 +160,20 @@ void *client_func(void *arg) {
     perror("Error creating inet socket");
     exit(EXIT_FAILURE);
   }
+
+  int reuse = 1;
+  if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse,
+                 sizeof(reuse)) < 0) {
+
+    perror("setsockopt(SO_REUSEADDR) failed");
+  }
+
+#ifdef SO_REUSEPORT
+  if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, (const char *)&reuse,
+                 sizeof(reuse)) < 0) {
+    perror("setsockopt(SO_REUSEPORT) failed");
+  }
+#endif
 
   printf("Successfully created inet socket!\n");
 
@@ -135,18 +228,19 @@ void *client_func(void *arg) {
           write_bytes(new, send_buff, 16);
         } else {
           /* Data arriving on an already-connected socket. */
-          uuid_t client_id;
-          unsigned long filesize = 0;
-          read_bytes(i, client_id, 16);
-          printf("From client UUID: %s\n", client_id);
-          read_bytes(i, &filesize, 8);
-          printf("From client FS: %lu\n", filesize);
-          printf("File size read: %d\n", recieve_file(i, filesize));
-          /* int size = read(i, buff, 4); */
-          /* if (read(i, , 4) <= 0) { */
-          /*   close(i); */
-          /*   FD_CLR(i, &active_fd_set); */
-          /* } */
+          struct orders *new_order = recieve_processing_request(i);
+          if (new_order == NULL) {
+            close(i);
+            FD_CLR(i, &active_fd_set);
+            printf("Closed a client connection\n");
+            continue;
+          }
+          else {
+            pthread_mutex_lock(&pending_queue);
+            enqueue_order(new_order);
+            print_queue(front_pending);
+            pthread_mutex_unlock(&pending_queue);
+          }
         }
       }
   }
@@ -157,55 +251,10 @@ void *web_func(void *arg) { return NULL; };
 
 void *processing_func(void *arg) { return NULL; };
 
-int is_empty(struct orders *front) { return front == NULL; };
-
-void enqueue_order(uuid_t client_id, short operation) {
-  struct orders *new_order = malloc(sizeof(struct orders));
-  memcpy(new_order->client_id, client_id, 16);
-  new_order->operation = operation;
-  new_order->next = NULL;
-  if (is_empty(front_order)) {
-    new_order->order_number = 0;
-    front_order = new_order;
-    back_order = front_order;
-  } else {
-    new_order->order_number = back_order->order_number + 1;
-    back_order->next = new_order;
-    back_order = new_order;
-  }
-};
-
-void add_to_finished(struct orders *order) {
-  order->next = NULL;
-  if (is_empty(front_finished)) {
-    front_finished = order;
-    back_finished = front_finished;
-  } else {
-    back_finished->next = order;
-    back_finished = order;
-  }
-}
-
-struct orders *dequeue(struct orders **front) {
-  struct orders *order = NULL;
-  if (!is_empty(*front)) {
-    order = *front;
-    *front = (*front)->next;
-  }
-  return order;
-};
-
-void print_queue(struct orders *front) {
-  while (front != NULL) {
-    printf("Order no:%llu, client_id: %s, op: %d\n", front->order_number,
-           front->client_id, front->operation);
-    front = front->next;
-  }
-}
 
 int main(int argc, char **argv) {
-  front_order = NULL;
-  back_order = NULL;
+  front_pending = NULL;
+  back_pending = NULL;
   front_finished = NULL;
   back_finished = NULL;
 
