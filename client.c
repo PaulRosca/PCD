@@ -1,6 +1,5 @@
 #include "operations.h"
 #include <arpa/inet.h>
-#include <bits/types.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <stddef.h>
@@ -11,6 +10,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
+#include "socket_utils.h"
 
 #define PORT 5555
 
@@ -21,26 +21,6 @@ char *get_filename_ext(char *filename) {
   if (!dot || dot == filename)
     return "";
   return dot + 1;
-};
-
-void read_bytes(int fd, void *buff, size_t size) {
-  size_t bytes_left = size;
-  int bytes_read = 0;
-  while (bytes_left > 0) {
-    bytes_read = read(fd, buff, bytes_left);
-    bytes_left -= bytes_read;
-    buff += bytes_read;
-  }
-};
-
-void write_bytes(int fd, void *buff, size_t size) {
-  size_t bytes_left = size;
-  int bytes_sent = 0;
-  while (bytes_left > 0) {
-    bytes_sent = write(fd, buff, bytes_left);
-    bytes_left -= bytes_sent;
-    buff += bytes_sent;
-  };
 };
 
 int send_file(char *filepath, int sfd) {
@@ -76,7 +56,8 @@ int send_file(char *filepath, int sfd) {
   return 0;
 };
 
-void send_processing_request(int sfd,char* filepath,unsigned short operation,char argument[64]) {
+void send_processing_request(int sfd, char *filepath, unsigned short operation,
+                             char argument[64]) {
   write_bytes(sfd, client_id, 16);
   write_bytes(sfd, &operation, 2);
   write_bytes(sfd, argument, 64);
@@ -89,15 +70,15 @@ char *get_image_path(const char *selected_option) {
   printf("%s\n", selected_option);
   printf("\nImage path:");
   ssize_t chars = getline(&img_path, &len, stdin);
-  if((img_path[chars-1]) == '\n') {
-    img_path[chars-1] = '\0';
+  if ((img_path[chars - 1]) == '\n') {
+    img_path[chars - 1] = '\0';
   }
   return img_path;
 };
 
 int main(int argc, char **argv) {
 
-  int sockfd, connfd;
+  int sockfd;
   struct sockaddr_in servaddr;
 
   // socket create and verification
@@ -138,7 +119,8 @@ int main(int argc, char **argv) {
     switch (o) {
     case 'r':
       strcpy(argument, "800x400");
-      send_processing_request(sockfd, get_image_path("Resize Image"), RESIZE, argument);
+      send_processing_request(sockfd, get_image_path("Resize Image"), RESIZE,
+                              argument);
       break;
     case 'e':
       close(sockfd);

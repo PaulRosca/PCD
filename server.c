@@ -1,6 +1,6 @@
 #include "operations.h"
+#include "socket_utils.h"
 #include <arpa/inet.h>
-#include <pthread.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -12,10 +12,12 @@
 #include <strings.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
 
 #define INET_PORT 5555
+#define UNIX_SOCK_PATH "/tmp/pcd_unix_sock"
 
 pthread_t admin_thread, client_thread, web_thread, processing_thread;
 
@@ -31,7 +33,7 @@ pthread_mutex_t pending_queue;
 
 int is_empty(struct orders *front) { return front == NULL; };
 
-void enqueue_order(struct orders* new_order) {
+void enqueue_order(struct orders *new_order) {
   new_order->next = NULL;
   if (is_empty(front_pending)) {
     new_order->order_number = 0;
@@ -66,31 +68,12 @@ struct orders *dequeue(struct orders **front) {
 
 void print_queue(struct orders *front) {
   while (front != NULL) {
-    printf("Order no:%llu, client_id: %s, op: %d argument: %s\n", front->order_number,
-           front->client_id, front->operation, front->argument);
+    printf("Order no:%llu, client_id: %s, op: %d argument: %s\n",
+           front->order_number, front->client_id, front->operation,
+           front->argument);
     front = front->next;
   }
 }
-
-void write_bytes(int fd, void *buff, size_t size) {
-  size_t bytes_left = size;
-  size_t bytes_sent = 0;
-  while (bytes_left > 0) {
-    bytes_sent = write(fd, buff, bytes_left);
-    bytes_left -= bytes_sent;
-    buff += bytes_sent;
-  };
-};
-
-void read_bytes(int fd, void *buff, size_t size) {
-  size_t bytes_left = size;
-  int bytes_read = 0;
-  while (bytes_left > 0) {
-    bytes_read = read(fd, buff, bytes_left);
-    bytes_left -= bytes_read;
-    buff += bytes_read;
-  }
-};
 
 int recieve_file(int sfd, size_t filesize) {
   int fp = open("request.webp", O_WRONLY | O_CREAT, 0666);
@@ -144,7 +127,69 @@ struct orders *recieve_processing_request(int i) {
   return order;
 }
 
-void *admin_func(void *arg) { return NULL; };
+void *admin_func(void *arg) {
+  int sock, admin_sock;
+  struct sockaddr_un serveraddr, clientname;
+  socklen_t size = sizeof(serveraddr);
+
+  sock = socket(AF_UNIX, SOCK_STREAM, 0);
+
+  if (sock == -1) {
+    perror("Error creating unix socket");
+    exit(EXIT_FAILURE);
+  }
+
+  printf("Successfully created unix socket!\n");
+
+  bzero(&serveraddr, sizeof(serveraddr));
+
+  serveraddr.sun_family = AF_UNIX;
+  strcpy(serveraddr.sun_path, UNIX_SOCK_PATH);
+
+  unlink(UNIX_SOCK_PATH);
+
+  if ((bind(sock, (struct sockaddr *)&serveraddr, size)) == -1) {
+    perror("Error binding unix socket");
+    close(sock);
+    exit(EXIT_FAILURE);
+  }
+
+  if (listen(sock, 0) < 0) {
+    perror("Error listening on UNIX socket");
+    close(sock);
+    exit(EXIT_FAILURE);
+  }
+
+  int connected = 0;
+
+  unsigned short op;
+  while (1) {
+
+    admin_sock = accept(sock, (struct sockaddr *)&clientname, &size);
+    if (admin_sock < 0) {
+      perror("Error accepting admin");
+      close(sock);
+      exit(EXIT_FAILURE);
+    }
+
+    printf("Server: connect from admin\n");
+    connected = 1;
+
+    while (connected) {
+      if ((read(admin_sock, &op, 1)) <= 0) {
+        close(admin_sock);
+        printf("Closed admin connection\n");
+        connected = 0;
+        /* break; */
+      } else {
+        read(admin_sock, ((void *)&op) + 1, 1);
+        printf("Read operation: %d\n", op);
+      }
+    }
+  }
+
+  return NULL;
+};
 
 void *client_func(void *arg) {
   int sock;
@@ -185,11 +230,13 @@ void *client_func(void *arg) {
 
   if ((bind(sock, (struct sockaddr *)&serveraddr, sizeof(serveraddr))) != 0) {
     perror("Error binding inet socket");
+    close(sock);
     exit(EXIT_FAILURE);
   }
 
   if (listen(sock, SOMAXCONN) < 0) {
-    perror("listen");
+    perror("Error listening on INET socket");
+    close(sock);
     exit(EXIT_FAILURE);
   }
 
@@ -203,6 +250,7 @@ void *client_func(void *arg) {
     read_fd_set = active_fd_set;
     if (select(FD_SETSIZE, &read_fd_set, NULL, NULL, NULL) < 0) {
       perror("select");
+      close(sock);
       exit(EXIT_FAILURE);
     }
 
@@ -217,6 +265,7 @@ void *client_func(void *arg) {
           new = accept(sock, (struct sockaddr *)&clientname, &size);
           if (new < 0) {
             perror("accept");
+            close(sock);
             exit(EXIT_FAILURE);
           }
           fprintf(stderr, "Server: connect from host %s, port %hd.\n",
@@ -234,8 +283,7 @@ void *client_func(void *arg) {
             FD_CLR(i, &active_fd_set);
             printf("Closed a client connection\n");
             continue;
-          }
-          else {
+          } else {
             pthread_mutex_lock(&pending_queue);
             enqueue_order(new_order);
             print_queue(front_pending);
@@ -250,7 +298,6 @@ void *client_func(void *arg) {
 void *web_func(void *arg) { return NULL; };
 
 void *processing_func(void *arg) { return NULL; };
-
 
 int main(int argc, char **argv) {
   front_pending = NULL;
