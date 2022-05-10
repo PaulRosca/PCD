@@ -1,3 +1,5 @@
+#include "operations.h"
+#include "socket_utils.h"
 #include <netdb.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -6,10 +8,14 @@
 #include <strings.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include "operations.h"
-#include "socket_utils.h"
 
 #define UNIX_SOCK_PATH "/tmp/pcd_unix_sock"
+
+void print_order(struct orders *order) {
+  printf("Order no: %llu, client_it: %s, operation: %d, argument: %s\n",
+         order->order_number, order->client_id, order->operation,
+         order->argument);
+}
 
 int main(int argc, char **argv) {
   int sockfd;
@@ -35,12 +41,13 @@ int main(int argc, char **argv) {
 
   printf("connected to the server..\n");
 
-  unsigned short op=155;
+  unsigned short op = 155;
   /* write_bytes(sockfd, &op, 2); */
   /* printf("Sent: %d\n", op); */
   char o = '\0';
+  struct orders order;
   while (1) {
-    printf("Operations\np.Get pending orders\ne.exit\n");
+    printf("Operations\np.Get pending orders\nf.Get finished orders\nc.Cancel order\ne.exit\n");
     printf("Select an operation:");
     fflush(stdin);
     o = getchar(); // Get user option
@@ -50,7 +57,31 @@ int main(int argc, char **argv) {
     case 'p':
       op = A_GET_PENDING;
       write_bytes(sockfd, &op, 2);
-      printf("Successfully sent %d to server\n",op);
+      printf("\nPending Orders\n");
+      read_bytes(sockfd, &order, sizeof(struct orders));
+      while (order.order_number != 0) {
+        print_order(&order);
+        read_bytes(sockfd, &order, sizeof(struct orders));
+      };
+      break;
+    case 'f':
+      op = A_GET_FINISHED;
+      write_bytes(sockfd, &op, 2);
+      printf("\nFinished Orders\n");
+      read_bytes(sockfd, &order, sizeof(struct orders));
+      while (order.order_number != 0) {
+        print_order(&order);
+        read_bytes(sockfd, &order, sizeof(struct orders));
+      };
+      break;
+    case 'c':
+      op = A_CANCEL;
+      unsigned long long order_no;
+      printf("Order number:");
+      scanf("%llu", &order_no);
+      getchar();
+      write_bytes(sockfd, &op, 2);
+      write_bytes(sockfd, &order_no, sizeof(order_no));
       break;
     case 'e':
       close(sockfd);

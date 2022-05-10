@@ -21,26 +21,24 @@
 
 pthread_t admin_thread, client_thread, web_thread, processing_thread;
 
-struct orders {
-  unsigned long long order_number;
-  uuid_t client_id;
-  unsigned short operation;
-  char argument[64];
-  struct orders *next;
-} * front_pending, *back_pending, *front_finished, *back_finished;
+struct orders *front_pending, *back_pending, *front_finished, *back_finished;
 
-pthread_mutex_t pending_queue;
+pthread_mutex_t pending_queue, finished_queue;
+pthread_cond_t c_var;
+unsigned long long order_no = 1;
 
 int is_empty(struct orders *front) { return front == NULL; };
 
 void enqueue_order(struct orders *new_order) {
   new_order->next = NULL;
+  new_order->order_number = order_no;
+  order_no++;
   if (is_empty(front_pending)) {
-    new_order->order_number = 0;
+    /* new_order->order_number = 1; */
     front_pending = new_order;
     back_pending = front_pending;
   } else {
-    new_order->order_number = back_pending->order_number + 1;
+    /* new_order->order_number = back_pending->order_number + 1; */
     back_pending->next = new_order;
     back_pending = new_order;
   }
@@ -64,6 +62,30 @@ struct orders *dequeue(struct orders **front) {
     *front = (*front)->next;
   }
   return order;
+};
+
+void cancel_order(struct orders **front, unsigned long long number) {
+  struct orders *it = *front;
+  if (is_empty(it)) {
+    return;
+  }
+  struct orders *ord;
+  if (it->order_number == number) {
+    printf("Got here with number %llu\n", number);
+    ord = it;
+    *front = it->next;
+    free(ord);
+    return;
+  }
+  while (it->next) {
+    if (it->next->order_number == number) {
+      ord = it->next;
+      it->next = it->next->next;
+      free(ord);
+      return;
+    }
+    it = it->next;
+  }
 };
 
 void print_queue(struct orders *front) {
@@ -127,6 +149,16 @@ struct orders *recieve_processing_request(int i) {
   return order;
 }
 
+void send_list(int sfd, struct orders *front) {
+  while (front != NULL) {
+    write_bytes(sfd, front, sizeof(struct orders));
+    front = front->next;
+  }
+  struct orders null_order;
+  null_order.order_number = 0;
+  write_bytes(sfd, &null_order, sizeof(struct orders));
+}
+
 void *admin_func(void *arg) {
   int sock, admin_sock;
   struct sockaddr_un serveraddr, clientname;
@@ -163,6 +195,7 @@ void *admin_func(void *arg) {
   int connected = 0;
 
   unsigned short op;
+  unsigned long long ord_no;
   while (1) {
 
     admin_sock = accept(sock, (struct sockaddr *)&clientname, &size);
@@ -180,10 +213,28 @@ void *admin_func(void *arg) {
         close(admin_sock);
         printf("Closed admin connection\n");
         connected = 0;
-        /* break; */
       } else {
         read(admin_sock, ((void *)&op) + 1, 1);
-        printf("Read operation: %d\n", op);
+        switch (op) {
+        case A_GET_PENDING:
+          pthread_mutex_lock(&pending_queue);
+          send_list(admin_sock, front_pending);
+          pthread_mutex_unlock(&pending_queue);
+          break;
+        case A_GET_FINISHED:
+          pthread_mutex_lock(&finished_queue);
+          send_list(admin_sock, front_finished);
+          pthread_mutex_unlock(&finished_queue);
+          break;
+        case A_CANCEL:
+          read_bytes(admin_sock, &ord_no, sizeof(ord_no));
+          pthread_mutex_lock(&finished_queue);
+          cancel_order(&front_pending, ord_no);
+          pthread_mutex_unlock(&finished_queue);
+          break;
+        default:
+          break;
+        }
       }
     }
   }
@@ -286,7 +337,7 @@ void *client_func(void *arg) {
           } else {
             pthread_mutex_lock(&pending_queue);
             enqueue_order(new_order);
-            print_queue(front_pending);
+            pthread_cond_signal(&c_var);
             pthread_mutex_unlock(&pending_queue);
           }
         }
@@ -297,13 +348,29 @@ void *client_func(void *arg) {
 
 void *web_func(void *arg) { return NULL; };
 
-void *processing_func(void *arg) { return NULL; };
+void *processing_func(void *arg) {
+  /* while(1) { */
+  /*   pthread_mutex_lock(&pending_queue); */
+  /*   while(is_empty(front_pending)) { */
+  /*     pthread_cond_wait(&c_var, &pending_queue); */
+  /*   } */
+  /*   printf("Processing pending queue\n"); */
+  /*   print_queue(front_pending); */
+  /*   dequeue(&front_pending); */
+  /*   pthread_mutex_unlock(&pending_queue); */
+  /* } */
+
+  return NULL;
+};
 
 int main(int argc, char **argv) {
   front_pending = NULL;
   back_pending = NULL;
   front_finished = NULL;
   back_finished = NULL;
+
+  pthread_mutex_init(&pending_queue, NULL);
+  pthread_mutex_init(&finished_queue, NULL);
 
   if (pthread_create(&admin_thread, NULL, admin_func, NULL) != 0) {
     perror("Error creating admin thread!");
@@ -329,5 +396,7 @@ int main(int argc, char **argv) {
   pthread_join(client_thread, NULL);
   pthread_join(web_thread, NULL);
   pthread_join(processing_thread, NULL);
+
+  pthread_mutex_destroy(&pending_queue);
   exit(EXIT_SUCCESS);
 };

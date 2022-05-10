@@ -1,4 +1,5 @@
 #include "operations.h"
+#include "socket_utils.h"
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -10,7 +11,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
-#include "socket_utils.h"
 
 #define PORT 5555
 
@@ -62,6 +62,7 @@ void send_processing_request(int sfd, char *filepath, unsigned short operation,
   write_bytes(sfd, &operation, 2);
   write_bytes(sfd, argument, 64);
   send_file(filepath, sfd);
+  free(filepath);
 }
 
 char *get_image_path(const char *selected_option) {
@@ -74,6 +75,17 @@ char *get_image_path(const char *selected_option) {
     img_path[chars - 1] = '\0';
   }
   return img_path;
+};
+
+char *get_operation_argument() {
+  char *arg = malloc(64 * sizeof(char));
+  size_t len = 0;
+  printf("Argument:");
+  ssize_t chars = getline(&arg, &len, stdin);
+  if ((arg[chars - 1]) == '\n') {
+    arg[chars - 1] = '\0';
+  }
+  return arg;
 };
 
 int main(int argc, char **argv) {
@@ -108,7 +120,7 @@ int main(int argc, char **argv) {
   printf("Client UUID: %s\n", client_id);
   printf("\n\n");
   char o = '\0';
-  char argument[64];
+  char* argument;
   while (1) {
     printf("Operations\nr.resize\ne.exit\n");
     printf("Select an operation:");
@@ -118,9 +130,8 @@ int main(int argc, char **argv) {
     printf("\n");
     switch (o) {
     case 'r':
-      strcpy(argument, "800x400");
       send_processing_request(sockfd, get_image_path("Resize Image"), RESIZE,
-                              argument);
+                              get_operation_argument());
       break;
     case 'e':
       close(sockfd);
