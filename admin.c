@@ -61,8 +61,10 @@ int main(int argc, char **argv) {
       read_bytes(sockfd, &order, sizeof(struct orders));
       while (order.order_number != 0) {
         print_order(&order);
+        bzero(&order, sizeof(order));
         read_bytes(sockfd, &order, sizeof(struct orders));
       };
+      bzero(&order, sizeof(order));
       break;
     case 'f':
       op = A_GET_FINISHED;
@@ -71,8 +73,10 @@ int main(int argc, char **argv) {
       read_bytes(sockfd, &order, sizeof(struct orders));
       while (order.order_number != 0) {
         print_order(&order);
+        bzero(&order, sizeof(order));
         read_bytes(sockfd, &order, sizeof(struct orders));
       };
+      bzero(&order, sizeof(order));
       break;
     case 'c':
       op = A_CANCEL;

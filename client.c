@@ -16,53 +16,18 @@
 
 uuid_t client_id;
 
-char *get_filename_ext(char *filename) {
-  char *dot = strrchr(filename, '.');
-  if (!dot || dot == filename)
-    return "";
-  return dot + 1;
-};
-
-int send_file(char *filepath, int sfd) {
-  int fp = open(filepath, O_RDONLY);
-  if (fp < 0) {
-    perror("Error opening file!");
-    return 1;
-  }
-  __off_t size = lseek(fp, 0l, SEEK_END);
-  printf("File size is %ld\n", size);
-  write_bytes(sfd, &size, 8); // Send file size to server
-  char ext[6];
-  strcpy(ext, get_filename_ext(filepath));
-  printf("Extension: %s\n", ext);
-  write_bytes(sfd, ext, 6);
-  lseek(fp, 0L, SEEK_SET);
-  char data[1024] = {0};
-  size_t total_bytes_sent = 0;
-  __off_t bytes_left = size;
-  __off_t bytes_sent = 0;
-  while (bytes_left > 0) {
-    bytes_sent = read(fp, data, 1024 > bytes_left ? bytes_left : 1024);
-    write_bytes(sfd, data, bytes_sent); // Send file content to server
-    /* printf("WRITE: %s\n", data); */
-    /* printf("BYTES_WRITE: %ld\n", bytes_sent); */
-    bzero(data, 1024);
-    bytes_left -= bytes_sent;
-    total_bytes_sent += bytes_sent;
-  }
-  printf("Done sending image!\n");
-  printf("Bytes sent: %lu\n", total_bytes_sent);
-  close(fp);
-  return 0;
-};
-
 void send_processing_request(int sfd, char *filepath, unsigned short operation,
-                             char argument[64]) {
+                             char* argument) {
   write_bytes(sfd, client_id, 16);
   write_bytes(sfd, &operation, 2);
-  write_bytes(sfd, argument, 64);
+  if(argument!=NULL) {
+    write_bytes(sfd, argument, 64);
+  }
   send_file(filepath, sfd);
   free(filepath);
+  if(argument!=NULL) {
+    free(argument);
+  }
 }
 
 char *get_image_path(const char *selected_option) {
@@ -120,9 +85,8 @@ int main(int argc, char **argv) {
   printf("Client UUID: %s\n", client_id);
   printf("\n\n");
   char o = '\0';
-  char* argument;
   while (1) {
-    printf("Operations\nr.resize\ne.exit\n");
+    printf("Operations\nr.resize\nc.convert\nf.flip\nt.get tags\ne.exit\n");
     printf("Select an operation:");
     fflush(stdin);
     o = getchar(); // Get user option
@@ -132,6 +96,24 @@ int main(int argc, char **argv) {
     case 'r':
       send_processing_request(sockfd, get_image_path("Resize Image"), RESIZE,
                               get_operation_argument());
+      recieve_file(sockfd, "server_processed");
+      break;
+    case 'c':
+      send_processing_request(sockfd, get_image_path("Convert Image"), CONVERT,
+                              get_operation_argument());
+      recieve_file(sockfd, "server_processed");
+      break;
+    case 'f':
+      send_processing_request(sockfd, get_image_path("Flip Image"), FLIP,
+                              NULL);
+      recieve_file(sockfd, "server_processed");
+      break;
+    case 't':
+      send_processing_request(sockfd, get_image_path("Tag Image"), TAGS,
+                              NULL);
+      char tags[128];
+      read_bytes(sockfd, tags, 128);
+      printf("Image tags are: %s", tags);
       break;
     case 'e':
       close(sockfd);
@@ -144,8 +126,6 @@ int main(int argc, char **argv) {
     printf("\n");
   }
 
-  /* write_bytes(sockfd, client_id, 16); */
-  /* send_file("./image.webp", sockfd); */
   close(sockfd);
   exit(EXIT_SUCCESS);
 };

@@ -21,7 +21,8 @@
 
 pthread_t admin_thread, client_thread, web_thread, processing_thread;
 
-struct orders *front_pending, *back_pending, *front_finished, *back_finished;
+struct orders *front_pending, *back_pending, *front_finished = NULL,
+                                             *back_finished;
 
 pthread_mutex_t pending_queue, finished_queue;
 pthread_cond_t c_var;
@@ -29,31 +30,17 @@ unsigned long long order_no = 1;
 
 int is_empty(struct orders *front) { return front == NULL; };
 
-void enqueue_order(struct orders *new_order) {
+void enqueue_order(struct orders *new_order, struct orders **front,
+                   struct orders **back) {
   new_order->next = NULL;
-  new_order->order_number = order_no;
-  order_no++;
-  if (is_empty(front_pending)) {
-    /* new_order->order_number = 1; */
-    front_pending = new_order;
-    back_pending = front_pending;
+  if (is_empty(*front)) {
+    *front = new_order;
+    *back = *front;
   } else {
-    /* new_order->order_number = back_pending->order_number + 1; */
-    back_pending->next = new_order;
-    back_pending = new_order;
+    (*back)->next = new_order;
+    *back = new_order;
   }
 };
-
-void add_to_finished(struct orders *order) {
-  order->next = NULL;
-  if (is_empty(front_finished)) {
-    front_finished = order;
-    back_finished = front_finished;
-  } else {
-    back_finished->next = order;
-    back_finished = order;
-  }
-}
 
 struct orders *dequeue(struct orders **front) {
   struct orders *order = NULL;
@@ -97,52 +84,36 @@ void print_queue(struct orders *front) {
   }
 }
 
-int recieve_file(int sfd, size_t filesize) {
-  int fp = open("request.webp", O_WRONLY | O_CREAT, 0666);
-  if (fp < 0) {
-    printf("Error opening file!\n");
-    return -1;
-  }
-  size_t bytes_left = filesize;
-  size_t bytes_read = 0;
-  size_t total_read_bytes = 0;
-  char buff[1024];
-  while (bytes_left > 0) {
-    bytes_read = read(sfd, buff, 1024 > bytes_left ? bytes_left : 1024);
-    /* printf("READ: %s\n", buff); */
-    /* printf("BYTES_READ: %lu\n",bytes_read); */
-    write_bytes(fp, buff, bytes_read);
-    bytes_left -= bytes_read;
-    bzero(buff, 1024);
-    total_read_bytes += bytes_read;
-  }
-  close(fp);
-  return total_read_bytes;
-};
-
 struct orders *recieve_processing_request(int i) {
   struct orders *order = NULL;
   uuid_t client_id;
   bzero(client_id, 16);
-  unsigned long filesize = 0;
+  /* __off_t filesize = 0; */
   unsigned short op;
   char arg[64];
-  char ext[6];
+  /* char ext[6]; */
   if (read(i, &client_id, 1) <= 0) {
     return order;
   }
+  order = malloc(sizeof(struct orders));
+  order->cfd = i;
   read_bytes(i, &client_id[1], 15);
   printf("From client UUID: %s\n", client_id);
   read_bytes(i, &op, 2);
   printf("From client Operation: %d\n", op);
-  read_bytes(i, &arg, 64);
-  printf("From client argument: %s\n", arg);
-  read_bytes(i, &filesize, 8);
-  printf("From client FS: %lu\n", filesize);
-  read_bytes(i, ext, 6);
-  printf("From client FE: %s\n", ext);
-  printf("File size read: %d\n", recieve_file(i, filesize));
-  order = malloc(sizeof(struct orders));
+  if (op != FLIP && op != TAGS) {
+    read_bytes(i, &arg, 64);
+    printf("From client argument: %s\n", arg);
+  }
+  pthread_mutex_lock(&pending_queue);
+  order->order_number = order_no;
+  order_no++;
+  pthread_mutex_unlock(&pending_queue);
+  char *filename = malloc(25 * sizeof(char));
+  sprintf(filename, "%llu", order->order_number);
+  char *fpth = recieve_file(i, filename);
+  strncpy(order->file_path, fpth, strlen(fpth));
+  printf("File read: %s\n", fpth);
   memcpy(order->client_id, client_id, 16);
   order->operation = op;
   strncpy(order->argument, arg, 64);
@@ -336,7 +307,7 @@ void *client_func(void *arg) {
             continue;
           } else {
             pthread_mutex_lock(&pending_queue);
-            enqueue_order(new_order);
+            enqueue_order(new_order, &front_pending, &back_pending);
             pthread_cond_signal(&c_var);
             pthread_mutex_unlock(&pending_queue);
           }
@@ -348,17 +319,103 @@ void *client_func(void *arg) {
 
 void *web_func(void *arg) { return NULL; };
 
+char *get_filename(char *filepath, char *extP) {
+  char *processed_fp = malloc(50 * sizeof(char));
+  char *it = filepath;
+  int i = 0;
+  while (it != (extP - 1)) {
+    processed_fp[i++] = *it;
+    it++;
+  }
+  processed_fp[i] = '\0';
+  strcat(processed_fp, "_processed.");
+  return processed_fp;
+}
+
 void *processing_func(void *arg) {
-  /* while(1) { */
-  /*   pthread_mutex_lock(&pending_queue); */
-  /*   while(is_empty(front_pending)) { */
-  /*     pthread_cond_wait(&c_var, &pending_queue); */
-  /*   } */
-  /*   printf("Processing pending queue\n"); */
-  /*   print_queue(front_pending); */
-  /*   dequeue(&front_pending); */
-  /*   pthread_mutex_unlock(&pending_queue); */
-  /* } */
+  while (1) {
+    pthread_mutex_lock(&pending_queue);
+    while (is_empty(front_pending)) {
+      pthread_cond_wait(&c_var, &pending_queue);
+    }
+    printf("Processing pending queue\n");
+    while (!is_empty(front_pending)) {
+      struct orders *to_process = dequeue(&front_pending);
+      pthread_mutex_unlock(&pending_queue);
+      char cmd[256];
+      char ext[6];
+      char *processed_fp;
+      char *extP;
+      int i = 0;
+      switch (to_process->operation) {
+      case RESIZE:
+        extP = get_filename_ext(to_process->file_path);
+        processed_fp = get_filename(to_process->file_path, extP);
+        strcat(processed_fp, extP);
+        sprintf(cmd, "gm convert -resize %s %s %s", to_process->argument,
+                to_process->file_path, processed_fp);
+        printf("Running command %s\n", cmd);
+        system(cmd);
+        remove(to_process->file_path);
+        send_file(processed_fp, to_process->cfd);
+        remove(processed_fp);
+        free(processed_fp);
+        break;
+      case CONVERT:
+        extP = get_filename_ext(to_process->file_path);
+        processed_fp = get_filename(to_process->file_path, extP);
+        strcat(processed_fp, to_process->argument);
+        sprintf(cmd, "gm convert %s %s", to_process->file_path, processed_fp);
+        printf("Running command %s\n", cmd);
+        system(cmd);
+        remove(to_process->file_path);
+        send_file(processed_fp, to_process->cfd);
+        remove(processed_fp);
+        free(processed_fp);
+        break;
+      case FLIP:
+        extP = get_filename_ext(to_process->file_path);
+        processed_fp = get_filename(to_process->file_path, extP);
+        strcat(processed_fp, extP);
+        sprintf(cmd, "gm convert -flip %s %s", to_process->file_path,
+                processed_fp);
+        printf("Running command %s\n", cmd);
+        system(cmd);
+        remove(to_process->file_path);
+        send_file(processed_fp, to_process->cfd);
+        remove(processed_fp);
+        free(processed_fp);
+        break;
+      case TAGS:
+        sprintf(cmd, "/usr/bin/python3 image-classifier.py %s",
+                to_process->file_path);
+        printf("Running command %s\n", cmd);
+
+        FILE *fp;
+        char output[128];
+
+        /* Open the command for reading. */
+        fp = popen(cmd, "r");
+        if (fp == NULL) {
+          printf("Failed to run command\n");
+          exit(1);
+        }
+
+        /* Read the output a line at a time - output it. */
+        fgets(output, sizeof(output), fp);
+        write_bytes(to_process->cfd, output, 128);
+        /* close */
+        pclose(fp);
+
+        remove(to_process->file_path);
+      default:
+        break;
+      }
+      pthread_mutex_lock(&finished_queue);
+      enqueue_order(to_process, &front_finished, &back_finished);
+      pthread_mutex_unlock(&finished_queue);
+    }
+  }
 
   return NULL;
 };
