@@ -1,11 +1,12 @@
-import socket
+from socket import *
+import struct
 import os
 PORT = 5555
 ADDRESS = "10.0.2.2"
 id = 0
 def send_file(sock, filepath):
     file_size = os.path.getsize(filepath)
-    sock.sendall(file_size.to_bytes(8, 'little'))
+    sock.sendall(struct.pack('!L',file_size))
     filename, ext = os.path.splitext(filepath)
     ext = ext[1:]
     print(f"Extension: {ext}\n")
@@ -20,7 +21,7 @@ def send_file(sock, filepath):
     print("Done sending image!\n")
 def receive_file(sock, filename):
     file_size = sock.recv(8)
-    file_size = int.from_bytes(file_size, 'little')
+    file_size = struct.unpack('!L',file_size)
     ext = sock.recv(6)
     ext = ext.split(b'\x00')[0]
     ext = str(ext, 'ascii', 'ignore')
@@ -42,13 +43,13 @@ def get_operation_argument():
     return arg
 def send_processing_request(sock, filepath, op, arg):
     sock.sendall(id)
-    sock.sendall(op.to_bytes(2, 'little'))
+    sock.sendall(struct.pack('!H',op))
     if arg != None:
         arg_msg = bytearray(arg, 'ascii')
         arg_msg.extend(bytes(64-len(arg_msg)))
         sock.sendall(arg_msg)
     send_file(sock, filepath)
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+with socket(AF_INET, SOCK_STREAM) as s:
     s.connect((ADDRESS, PORT))
     print("Connected to server")
     id = s.recv(16)

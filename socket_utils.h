@@ -18,7 +18,7 @@ void read_bytes(int fd, void *buff, size_t size);
 
 void write_bytes(int fd, void *buff, size_t size);
 
-char *recieve_file(int sfd, char *filename);
+char *receive_file(int sfd, char *filename);
 
 int send_file(char *filepath, int sfd);
 

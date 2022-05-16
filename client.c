@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,15 +18,16 @@
 uuid_t client_id;
 
 void send_processing_request(int sfd, char *filepath, unsigned short operation,
-                             char* argument) {
+                             char *argument) {
   write_bytes(sfd, client_id, 16);
+  operation = htons(operation);
   write_bytes(sfd, &operation, 2);
-  if(argument!=NULL) {
+  if (argument != NULL) {
     write_bytes(sfd, argument, 64);
   }
   send_file(filepath, sfd);
   free(filepath);
-  if(argument!=NULL) {
+  if (argument != NULL) {
     free(argument);
   }
 }
@@ -96,21 +98,19 @@ int main(int argc, char **argv) {
     case 'r':
       send_processing_request(sockfd, get_image_path("Resize Image"), RESIZE,
                               get_operation_argument());
-      recieve_file(sockfd, "server_processed");
+      receive_file(sockfd, "server_processed");
       break;
     case 'c':
       send_processing_request(sockfd, get_image_path("Convert Image"), CONVERT,
                               get_operation_argument());
-      recieve_file(sockfd, "server_processed");
+      receive_file(sockfd, "server_processed");
       break;
     case 'f':
-      send_processing_request(sockfd, get_image_path("Flip Image"), FLIP,
-                              NULL);
-      recieve_file(sockfd, "server_processed");
+      send_processing_request(sockfd, get_image_path("Flip Image"), FLIP, NULL);
+      receive_file(sockfd, "server_processed");
       break;
     case 't':
-      send_processing_request(sockfd, get_image_path("Tag Image"), TAGS,
-                              NULL);
+      send_processing_request(sockfd, get_image_path("Tag Image"), TAGS, NULL);
       char tags[128];
       read_bytes(sockfd, tags, 128);
       printf("Image tags are: %s", tags);

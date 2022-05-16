@@ -84,7 +84,7 @@ void print_queue(struct orders *front) {
   }
 }
 
-struct orders *recieve_processing_request(int i) {
+struct orders *receive_processing_request(int i) {
   struct orders *order = NULL;
   uuid_t client_id;
   bzero(client_id, 16);
@@ -100,6 +100,7 @@ struct orders *recieve_processing_request(int i) {
   read_bytes(i, &client_id[1], 15);
   printf("From client UUID: %s\n", client_id);
   read_bytes(i, &op, 2);
+  op = ntohs(op);
   printf("From client Operation: %d\n", op);
   if (op != FLIP && op != TAGS) {
     read_bytes(i, &arg, 64);
@@ -111,7 +112,7 @@ struct orders *recieve_processing_request(int i) {
   pthread_mutex_unlock(&pending_queue);
   char *filename = malloc(25 * sizeof(char));
   sprintf(filename, "%llu", order->order_number);
-  char *fpth = recieve_file(i, filename);
+  char *fpth = receive_file(i, filename);
   strncpy(order->file_path, fpth, strlen(fpth));
   printf("File read: %s\n", fpth);
   memcpy(order->client_id, client_id, 16);
@@ -121,12 +122,16 @@ struct orders *recieve_processing_request(int i) {
 }
 
 void send_list(int sfd, struct orders *front) {
+  struct orders to_send;
   while (front != NULL) {
-    write_bytes(sfd, front, sizeof(struct orders));
+    memcpy(&to_send, front, sizeof(struct orders));
+    to_send.operation = htons(to_send.operation);
+    to_send.order_number = htonl(to_send.order_number);
+    write_bytes(sfd, &to_send, sizeof(struct orders));
     front = front->next;
   }
   struct orders null_order;
-  null_order.order_number = 0;
+  null_order.order_number = htonl(0);
   write_bytes(sfd, &null_order, sizeof(struct orders));
 }
 
@@ -186,6 +191,7 @@ void *admin_func(void *arg) {
         connected = 0;
       } else {
         read(admin_sock, ((void *)&op) + 1, 1);
+        op = ntohs(op);
         switch (op) {
         case A_GET_PENDING:
           pthread_mutex_lock(&pending_queue);
@@ -199,6 +205,8 @@ void *admin_func(void *arg) {
           break;
         case A_CANCEL:
           read_bytes(admin_sock, &ord_no, sizeof(ord_no));
+          ord_no = ntohl(ord_no);
+          printf("Ord %llu\n", ord_no);
           pthread_mutex_lock(&finished_queue);
           cancel_order(&front_pending, ord_no);
           pthread_mutex_unlock(&finished_queue);
@@ -299,7 +307,7 @@ void *client_func(void *arg) {
           write_bytes(new, send_buff, 16);
         } else {
           /* Data arriving on an already-connected socket. */
-          struct orders *new_order = recieve_processing_request(i);
+          struct orders *new_order = receive_processing_request(i);
           if (new_order == NULL) {
             close(i);
             FD_CLR(i, &active_fd_set);

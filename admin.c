@@ -1,6 +1,7 @@
 #include "operations.h"
 #include "socket_utils.h"
 #include <netdb.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +13,7 @@
 #define UNIX_SOCK_PATH "/tmp/pcd_unix_sock"
 
 void print_order(struct orders *order) {
-  printf("Order no: %llu, client_it: %s, operation: %d, argument: %s\n",
+  printf("Order no: %llu, client_id: %s, operation: %d, argument: %s\n",
          order->order_number, order->client_id, order->operation,
          order->argument);
 }
@@ -47,7 +48,8 @@ int main(int argc, char **argv) {
   char o = '\0';
   struct orders order;
   while (1) {
-    printf("Operations\np.Get pending orders\nf.Get finished orders\nc.Cancel order\ne.exit\n");
+    printf("Operations\np.Get pending orders\nf.Get finished orders\nc.Cancel "
+           "order\ne.exit\n");
     printf("Select an operation:");
     fflush(stdin);
     o = getchar(); // Get user option
@@ -55,35 +57,44 @@ int main(int argc, char **argv) {
     printf("\n");
     switch (o) {
     case 'p':
-      op = A_GET_PENDING;
+      op = htons(A_GET_PENDING);
       write_bytes(sockfd, &op, 2);
       printf("\nPending Orders\n");
       read_bytes(sockfd, &order, sizeof(struct orders));
+      order.order_number = ntohl(order.order_number);
+      order.operation = ntohs(order.operation);
       while (order.order_number != 0) {
         print_order(&order);
         bzero(&order, sizeof(order));
         read_bytes(sockfd, &order, sizeof(struct orders));
+        order.order_number = ntohl(order.order_number);
+        order.operation = ntohs(order.operation);
       };
       bzero(&order, sizeof(order));
       break;
     case 'f':
-      op = A_GET_FINISHED;
+      op = htons(A_GET_FINISHED);
       write_bytes(sockfd, &op, 2);
       printf("\nFinished Orders\n");
       read_bytes(sockfd, &order, sizeof(struct orders));
+      order.order_number = ntohl(order.order_number);
+      order.operation = ntohs(order.operation);
       while (order.order_number != 0) {
         print_order(&order);
         bzero(&order, sizeof(order));
         read_bytes(sockfd, &order, sizeof(struct orders));
+        order.order_number = ntohl(order.order_number);
+        order.operation = ntohs(order.operation);
       };
       bzero(&order, sizeof(order));
       break;
     case 'c':
-      op = A_CANCEL;
+      op = htons(A_CANCEL);
       unsigned long long order_no;
       printf("Order number:");
       scanf("%llu", &order_no);
       getchar();
+      order_no = htonl(order_no);
       write_bytes(sockfd, &op, 2);
       write_bytes(sockfd, &order_no, sizeof(order_no));
       break;
