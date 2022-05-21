@@ -9,12 +9,12 @@ pentru procesarea de imagini. Fișier `client.py`
 
 ## Dependințe
 
-Pentru procesarea de imagini serverul de folosește de aplicația `GraphicsMagick`, care trebuie să fie instalată pe mașina host.
+Pentru procesarea de imagini serverul de folosește de aplicația `GraphicsMagick`, care trebuie să fie instalată pe mașina host a serverului.
 Similar funcția de tagg-ing a pozelor, este bazată pe un script python de machine learning care are ca dependințe `python3` și biblioteca `tensorflow`
 
 ## Configurare și Compilare
 
-Proiectul este configurat pentru a funcționa pe rețeaua localhost (127.0.0.1) port 5555, iar clientul de python pentru windows a fost configurat pentru a accesa rețeaua localhost din interiorul unei maișini virtuale din VirtualBox, astfel se conectează la adresa 10.0.2.2:5555.
+Proiectul este configurat pentru a funcționa pe rețeaua `localhost` (`127.0.0.1`) port `5555`, iar clientul de python pentru windows a fost configurat pentru a accesa rețeaua localhost din interiorul unei maișini virtuale din VirtualBox, astfel se conectează la adresa `10.0.2.2:5555`.
 
 Fișierele se generează folosind următoarele comenzi
 - Pentru server `make server_unix`, care generează fișierul `server`
