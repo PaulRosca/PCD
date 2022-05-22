@@ -113,6 +113,7 @@ struct orders *receive_processing_request(int i) {
   char *filename = malloc(25 * sizeof(char));
   sprintf(filename, "%llu", order->order_number);
   char *fpth = receive_file(i, filename);
+  free(filename);
   strncpy(order->file_path, fpth, strlen(fpth));
   printf("File read: %s\n", fpth);
   memcpy(order->client_id, client_id, 16);

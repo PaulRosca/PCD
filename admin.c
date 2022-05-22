@@ -13,9 +13,15 @@
 #define UNIX_SOCK_PATH "/tmp/pcd_unix_sock"
 
 void print_order(struct orders *order) {
-  printf("Order no: %llu, client_id: %s, operation: %d, argument: %s\n",
-         order->order_number, order->client_id, order->operation,
-         order->argument);
+  if (order->operation == 102 || order->operation == 199) {
+    printf("Order no: %llu, client_id: %s, operation: %d\n",
+           order->order_number, order->client_id, order->operation);
+
+  } else {
+    printf("Order no: %llu, client_id: %s, operation: %d, argument: %s\n",
+           order->order_number, order->client_id, order->operation,
+           order->argument);
+  }
 }
 
 int main(int argc, char **argv) {
