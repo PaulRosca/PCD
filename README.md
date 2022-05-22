@@ -65,7 +65,7 @@ Adminul alege din 3 operațiuni. Acestea sunt definite în fișierul `operations
 
 ## Structură cereri Client
 
-Cererile trimise de client vor fi de forma
+Cererile trimise de client vor fi de forma, unde `ID Client` este primit de la server odată cu conectarea la acesta.
 
 | ID Client |  Operațiune  |  Argument  |  Mărime fișier | Extensie fișie |  Fișier               |
 |   :--:    |     :--:     |    :--:    |      :--:      |      :--:      |   :--:                |
