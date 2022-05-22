@@ -9,7 +9,7 @@ pentru procesarea de imagini. Fișier `client.py`
 
 ## Dependințe
 
-Pentru procesarea de imagini serverul de folosește de aplicația `GraphicsMagick`, care trebuie să fie instalată pe mașina host a serverului.
+Pentru procesarea de imagini serverul se folosește de aplicația `GraphicsMagick`, care trebuie să fie instalată pe mașina host a serverului.
 Similar funcția de tagg-ing a pozelor, este bazată pe un script python de machine learning care are ca dependințe `python3` și biblioteca `tensorflow`
 
 ## Configurare și Compilare
