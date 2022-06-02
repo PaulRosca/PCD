@@ -559,6 +559,7 @@ int ns2__processImage(struct soap *soap, int operation, char *argument,
     if (!argument) {
       char *msg = (char *)soap_malloc(soap, 1024);
       snprintf(msg, 1024, "No argument provided!");
+      remove(file_path);
       return soap_sender_fault(soap, msg, NULL);
     }
     strcat(processed_fp, extP);
@@ -579,6 +580,7 @@ int ns2__processImage(struct soap *soap, int operation, char *argument,
     if (!argument) {
       char *msg = (char *)soap_malloc(soap, 1024);
       snprintf(msg, 1024, "No argument provided!");
+      remove(file_path);
       return soap_sender_fault(soap, msg, NULL);
     }
     strcat(processed_fp, argument);
