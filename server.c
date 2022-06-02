@@ -1,6 +1,9 @@
 #include "operations.h"
+#include "pcd.nsmap"
+#include "soapH.h"
 #include "socket_utils.h"
 #include <arpa/inet.h>
+#include <asm-generic/socket.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -24,7 +27,7 @@ pthread_t admin_thread, client_thread, web_thread, processing_thread;
 struct orders *front_pending, *back_pending, *front_finished = NULL,
                                              *back_finished;
 
-pthread_mutex_t pending_queue, finished_queue;
+pthread_mutex_t pending_queue, finished_queue, order_no_mtx;
 pthread_cond_t c_var;
 unsigned long long order_no = 1;
 
@@ -58,7 +61,6 @@ void cancel_order(struct orders **front, unsigned long long number) {
   }
   struct orders *ord;
   if (it->order_number == number) {
-    printf("Got here with number %llu\n", number);
     ord = it;
     *front = it->next;
     free(ord);
@@ -106,12 +108,12 @@ struct orders *receive_processing_request(int i) {
     read_bytes(i, &arg, 64);
     printf("From client argument: %s\n", arg);
   }
-  pthread_mutex_lock(&pending_queue);
+  char *filename = malloc(25 * sizeof(char));
+  pthread_mutex_lock(&order_no_mtx);
   order->order_number = order_no;
   order_no++;
-  pthread_mutex_unlock(&pending_queue);
-  char *filename = malloc(25 * sizeof(char));
   sprintf(filename, "%llu", order->order_number);
+  pthread_mutex_unlock(&order_no_mtx);
   char *fpth = receive_file(i, filename);
   free(filename);
   strncpy(order->file_path, fpth, strlen(fpth));
@@ -326,9 +328,26 @@ void *client_func(void *arg) {
   return NULL;
 };
 
-void *web_func(void *arg) { return NULL; };
+void *web_func(void *arg) {
+  struct soap *soap = soap_new1(SOAP_XML_INDENT);
+  soap->bind_flags = SO_REUSEADDR;
+  if (!soap_valid_socket(soap_bind(soap, NULL, 8080, 100))) {
+    perror("Error creating web socket!");
+    exit(EXIT_FAILURE);
+  }
+  while (soap_valid_socket(soap_accept(soap))) {
+    if (soap_serve(soap) != SOAP_OK)
+      printf("Error processing soap request!\n");
+    /* break; */
+    soap_destroy(soap); // delete deserialized C++ instances
+    soap_end(soap);     // delete other managed data
+  }
+  soap_print_fault(soap, stderr);
+  soap_free(soap); // free the soap struct context data
+  return NULL;
+};
 
-char *get_filename(char *filepath, char *extP) {
+char *get_processed_filename(char *filepath, char *extP) {
   char *processed_fp = malloc(50 * sizeof(char));
   char *it = filepath;
   int i = 0;
@@ -358,8 +377,8 @@ void *processing_func(void *arg) {
       int i = 0;
       switch (to_process->operation) {
       case RESIZE:
-        extP = get_filename_ext(to_process->file_path);
-        processed_fp = get_filename(to_process->file_path, extP);
+        extP = get_filename_ext(to_process->file_path, '.');
+        processed_fp = get_processed_filename(to_process->file_path, extP);
         strcat(processed_fp, extP);
         sprintf(cmd, "gm convert -resize %s %s %s", to_process->argument,
                 to_process->file_path, processed_fp);
@@ -371,8 +390,8 @@ void *processing_func(void *arg) {
         free(processed_fp);
         break;
       case CONVERT:
-        extP = get_filename_ext(to_process->file_path);
-        processed_fp = get_filename(to_process->file_path, extP);
+        extP = get_filename_ext(to_process->file_path, '.');
+        processed_fp = get_processed_filename(to_process->file_path, extP);
         strcat(processed_fp, to_process->argument);
         sprintf(cmd, "gm convert %s %s", to_process->file_path, processed_fp);
         printf("Running command %s\n", cmd);
@@ -383,8 +402,8 @@ void *processing_func(void *arg) {
         free(processed_fp);
         break;
       case FLIP:
-        extP = get_filename_ext(to_process->file_path);
-        processed_fp = get_filename(to_process->file_path, extP);
+        extP = get_filename_ext(to_process->file_path, '.');
+        processed_fp = get_processed_filename(to_process->file_path, extP);
         strcat(processed_fp, extP);
         sprintf(cmd, "gm convert -flip %s %s", to_process->file_path,
                 processed_fp);
@@ -435,6 +454,7 @@ int main(int argc, char **argv) {
   front_finished = NULL;
   back_finished = NULL;
 
+  pthread_mutex_init(&order_no_mtx, NULL);
   pthread_mutex_init(&pending_queue, NULL);
   pthread_mutex_init(&finished_queue, NULL);
 
@@ -463,6 +483,150 @@ int main(int argc, char **argv) {
   pthread_join(web_thread, NULL);
   pthread_join(processing_thread, NULL);
 
+  pthread_mutex_destroy(&order_no_mtx);
   pthread_mutex_destroy(&pending_queue);
+  pthread_mutex_destroy(&finished_queue);
   exit(EXIT_SUCCESS);
+};
+int prefix(const char *pre, const char *str) {
+  return strncmp(pre, str, strlen(pre)) == 0;
+}
+struct image {
+  char *ptr;
+  unsigned long long size;
+};
+
+struct image *read_file(char *filepath, struct soap *soap) {
+  struct image *image = soap_malloc(soap, sizeof(struct image));
+  int fp = open(filepath, O_RDONLY);
+  image->size = lseek(fp, 0l, SEEK_END);
+  lseek(fp, 0l, SEEK_SET);
+  unsigned long long bytes_left = image->size;
+  unsigned long long bytes_read = 0;
+  unsigned long long total_bytes_read = 0;
+  char data[1024] = {0};
+  image->ptr = soap_malloc(soap, image->size);
+  while (bytes_left > 0) {
+    bytes_read = read(fp, data, 1024 > bytes_left ? bytes_left : 1024);
+    soap_memcpy(image->ptr + total_bytes_read, image->size, data, bytes_read);
+    bzero(data, 1024);
+    bytes_left -= bytes_read;
+    total_bytes_read += bytes_read;
+  }
+  return image;
+};
+
+int ns2__processImage(struct soap *soap, int operation, char *argument,
+                      char **result) {
+  int n = 0;
+  printf("Got operation %d with argument %s on Web Thread\n", operation,
+         argument);
+  struct soap_multipart *attachment = soap->mime.list;
+  while (attachment) {
+    if (attachment->type && prefix("image/", attachment->type)) {
+      break;
+    }
+    attachment = attachment->next;
+  }
+  if (!attachment) {
+    char *msg = (char *)soap_malloc(soap, 1024);
+    snprintf(msg, 1024, "No image provided!");
+    return soap_sender_fault(soap, msg, NULL);
+  }
+  char *extP = get_filename_ext(attachment->type, '/');
+  char *file_path = (char *)soap_malloc(soap, 50);
+  char *processed_fp = (char *)soap_malloc(soap, 50);
+  pthread_mutex_lock(&order_no_mtx);
+  sprintf(file_path, "%llu.%s", order_no, extP);
+  sprintf(processed_fp, "%llu_processed.", order_no);
+  order_no++;
+  pthread_mutex_unlock(&order_no_mtx);
+  int fp = open(file_path, O_WRONLY | O_CREAT, 0666);
+  if (fp < 0) {
+    printf("Error opening file!\n");
+    char *msg = (char *)soap_malloc(soap, 1024);
+    snprintf(msg, 1024, "Server Error!");
+    return soap_sender_fault(soap, msg, NULL);
+  }
+  write_bytes(fp, (void *)attachment->ptr, attachment->size);
+  char cmd[256];
+  char mime[15] = "\0";
+  struct image *img;
+  *result = (char*)soap_malloc(soap, 128);
+  soap_set_mime(soap, NULL, "body");
+  switch (operation) {
+  case RESIZE:
+    strcat(processed_fp, extP);
+    sprintf(cmd, "gm convert -resize %s %s %s", argument, file_path,
+            processed_fp);
+    printf("Running command %s\n", cmd);
+    system(cmd);
+    remove(file_path);
+    img = read_file(processed_fp, soap);
+    strcat(mime, "image/");
+    strcat(mime, extP);
+    soap_set_mime_attachment(soap, img->ptr, img->size, SOAP_MIME_NONE,
+                             mime, "processed_image", NULL, NULL);
+    remove(processed_fp);
+    sprintf(*result, "Successfully resized image to %s",argument);
+    break;
+  case CONVERT:
+    strcat(processed_fp, argument);
+    sprintf(cmd, "gm convert %s %s", file_path, processed_fp);
+    printf("Running command %s\n", cmd);
+    system(cmd);
+    remove(file_path);
+    img = read_file(processed_fp, soap);
+    strcat(mime, "image/");
+    strcat(mime, argument);
+    soap_set_mime_attachment(soap, img->ptr, img->size, SOAP_MIME_NONE, mime,
+                             "processed_image", NULL, NULL);
+    remove(processed_fp);
+    sprintf(*result, "Successfully converted image to %s",argument);
+    break;
+  case FLIP:
+    strcat(processed_fp, extP);
+    sprintf(cmd, "gm convert -flip %s %s", file_path, processed_fp);
+    printf("Running command %s\n", cmd);
+    system(cmd);
+    remove(file_path);
+    img = read_file(processed_fp, soap);
+    strcat(mime, "image/");
+    strcat(mime, extP);
+    soap_set_mime_attachment(soap, img->ptr, img->size, SOAP_MIME_NONE,
+                             mime, "processed_image", NULL, NULL);
+    remove(processed_fp);
+    sprintf(*result, "Successfully fliped image");
+    break;
+  case TAGS:
+    soap_clr_mime(soap);
+    sprintf(cmd, "/usr/bin/python3 image-classifier.py %s", file_path);
+    printf("Running command %s\n", cmd);
+
+    FILE *fp;
+    char output[128];
+
+    /* Open the command for reading. */
+    fp = popen(cmd, "r");
+    if (fp == NULL) {
+      printf("Failed to run command\n");
+      exit(1);
+    }
+
+    /* Read the output a line at a time - output it. */
+    fgets(output, sizeof(output), fp);
+    soap_memcpy(*result, 128, output, 128);
+    /* close */
+    pclose(fp);
+
+    remove(file_path);
+    break;
+  default:
+    char *msg = (char *)soap_malloc(soap, 1024);
+    snprintf(msg, 1024, "Unsuported operation!");
+    remove(file_path);
+    return soap_sender_fault(soap, msg, NULL);
+    break;
+  }
+  return SOAP_OK;
 };

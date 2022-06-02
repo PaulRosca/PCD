@@ -22,6 +22,6 @@ char *receive_file(int sfd, char *filename);
 
 int send_file(char *filepath, int sfd);
 
-char *get_filename_ext(char *filename);
+char *get_filename_ext(const char *filename, char delimiter);
 
 #endif // SOCKET_UTILS_H_

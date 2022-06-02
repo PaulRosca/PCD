@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions name="pcd"
+ targetNamespace="http://websrv.cs.fsu.edu/~engelen/calc.wsdl"
+ xmlns:tns="http://websrv.cs.fsu.edu/~engelen/calc.wsdl"
+ xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+ xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+ xmlns:ns="urn:pcd"
+ xmlns:SOAP="http://schemas.xmlsoap.org/wsdl/soap/"
+ xmlns:MIME="http://schemas.xmlsoap.org/wsdl/mime/"
+ xmlns:DIME="http://schemas.xmlsoap.org/ws/2002/04/dime/wsdl/"
+ xmlns:WSDL="http://schemas.xmlsoap.org/wsdl/"
+ xmlns="http://schemas.xmlsoap.org/wsdl/">
+
+<types>
+
+ <schema targetNamespace="urn:pcd"
+  xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+  xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+  xmlns:ns="urn:pcd"
+  xmlns="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="unqualified"
+  attributeFormDefault="unqualified">
+  <import namespace="http://schemas.xmlsoap.org/soap/encoding/"/>
+ </schema>
+
+</types>
+
+<message name="processImageRequest">
+ <part name="operation" type="xsd:int" minOccurs="1" maxOccurs="1"/>
+ <part name="argument" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+</message>
+
+<message name="processImageResponse">
+ <part name="result" type="xsd:string"/>
+</message>
+
+<portType name="pcdPortType">
+ <operation name="processImage">
+  <documentation>Service definition of function ns__add</documentation>
+  <input message="tns:processImageRequest"/>
+  <output message="tns:processImageResponse"/>
+ </operation>
+</portType>
+
+<binding name="pcd" type="tns:pcdPortType">
+ <SOAP:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+ <operation name="processImage">
+  <SOAP:operation style="rpc" soapAction=""/>
+  <input>
+     <SOAP:body use="encoded" namespace="urn:pcd" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"/>
+  </input>
+  <output>
+     <SOAP:body use="encoded" namespace="urn:pcd" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"/>
+  </output>
+ </operation>
+</binding>
+
+<service name="pcd">
+ <documentation>gSOAP 2.7.9k generated service definition</documentation>
+ <port name="pcd" binding="tns:pcd">
+  <SOAP:address location="http://localhost:8080/soap"/>
+ </port>
+</service>
+
+</definitions>

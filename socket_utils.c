@@ -68,7 +68,7 @@ int send_file(char *filepath, int sfd) {
   size = htonl(size);
   write_bytes(sfd, &size, 4); // Send file size to server
   char ext[6];
-  strcpy(ext, get_filename_ext(filepath));
+  strcpy(ext, get_filename_ext(filepath,'.'));
   printf("Extension: %s\n", ext);
   write_bytes(sfd, ext, 6);
   lseek(fp, 0L, SEEK_SET);
@@ -89,8 +89,8 @@ int send_file(char *filepath, int sfd) {
   return 0;
 };
 
-char *get_filename_ext(char *filename) {
-  char *dot = strrchr(filename, '.');
+char *get_filename_ext(const char *filename, char delimiter) {
+  char *dot = strrchr(filename, delimiter);
   if (!dot || dot == filename)
     return "";
   return dot + 1;
