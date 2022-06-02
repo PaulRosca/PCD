@@ -552,10 +552,15 @@ int ns2__processImage(struct soap *soap, int operation, char *argument,
   char cmd[256];
   char mime[15] = "\0";
   struct image *img;
-  *result = (char*)soap_malloc(soap, 128);
+  *result = (char *)soap_malloc(soap, 128);
   soap_set_mime(soap, NULL, "body");
   switch (operation) {
   case RESIZE:
+    if (!argument) {
+      char *msg = (char *)soap_malloc(soap, 1024);
+      snprintf(msg, 1024, "No argument provided!");
+      return soap_sender_fault(soap, msg, NULL);
+    }
     strcat(processed_fp, extP);
     sprintf(cmd, "gm convert -resize %s %s %s", argument, file_path,
             processed_fp);
@@ -565,12 +570,17 @@ int ns2__processImage(struct soap *soap, int operation, char *argument,
     img = read_file(processed_fp, soap);
     strcat(mime, "image/");
     strcat(mime, extP);
-    soap_set_mime_attachment(soap, img->ptr, img->size, SOAP_MIME_NONE,
-                             mime, "processed_image", NULL, NULL);
+    soap_set_mime_attachment(soap, img->ptr, img->size, SOAP_MIME_NONE, mime,
+                             "processed_image", NULL, NULL);
     remove(processed_fp);
-    sprintf(*result, "Successfully resized image to %s",argument);
+    sprintf(*result, "Successfully resized image to %s", argument);
     break;
   case CONVERT:
+    if (!argument) {
+      char *msg = (char *)soap_malloc(soap, 1024);
+      snprintf(msg, 1024, "No argument provided!");
+      return soap_sender_fault(soap, msg, NULL);
+    }
     strcat(processed_fp, argument);
     sprintf(cmd, "gm convert %s %s", file_path, processed_fp);
     printf("Running command %s\n", cmd);
@@ -582,7 +592,7 @@ int ns2__processImage(struct soap *soap, int operation, char *argument,
     soap_set_mime_attachment(soap, img->ptr, img->size, SOAP_MIME_NONE, mime,
                              "processed_image", NULL, NULL);
     remove(processed_fp);
-    sprintf(*result, "Successfully converted image to %s",argument);
+    sprintf(*result, "Successfully converted image to %s", argument);
     break;
   case FLIP:
     strcat(processed_fp, extP);
@@ -593,8 +603,8 @@ int ns2__processImage(struct soap *soap, int operation, char *argument,
     img = read_file(processed_fp, soap);
     strcat(mime, "image/");
     strcat(mime, extP);
-    soap_set_mime_attachment(soap, img->ptr, img->size, SOAP_MIME_NONE,
-                             mime, "processed_image", NULL, NULL);
+    soap_set_mime_attachment(soap, img->ptr, img->size, SOAP_MIME_NONE, mime,
+                             "processed_image", NULL, NULL);
     remove(processed_fp);
     sprintf(*result, "Successfully fliped image");
     break;
