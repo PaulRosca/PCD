@@ -14,7 +14,9 @@ Similar funcția de tagg-ing a pozelor, este bazată pe un script python de mach
 
 ## Configurare și Compilare
 
-Proiectul este configurat pentru a funcționa pe rețeaua `localhost` (`127.0.0.1`) port `5555`, iar clientul de python pentru windows a fost configurat pentru a accesa rețeaua localhost din interiorul unei maișini virtuale din VirtualBox, astfel se conectează la adresa `10.0.2.2:5555`.
+Serverul este configurat pentru a funcționa pe rețeaua `localhost` (`127.0.0.1`) port `5555`, iar clientul de python pentru windows a fost configurat pentru a accesa rețeaua localhost din interiorul unei maișini virtuale din VirtualBox, astfel se conectează la adresa `10.0.2.2:5555`.
+
+Serverul expune și un serviciu web bazat pe gsoap, pe portul `8080`.
 
 Fișierele se generează folosind următoarele comenzi
 - Pentru server `make server_unix`, care generează fișierul `server`
@@ -95,3 +97,44 @@ Clientul alege din 4 operațiuni. Acestea sunt definite în fișierul `operation
 - `CONVERT` sau `101`. Pentru a schimba formatul unei imagini trimise către server. (Exemplu: din formatul `webp` în formatul `png`)
 - `FLIP` sau `102`. Pentru a răsturna o imagine trimisă către server.
 - `TAGS` sau `199`. Pentru a primi automat 3 cuvinte cheie care descriu conținutul imaginii.
+
+## GSOAP
+
+Partea de GSOAP oferă aceleași servicii pentru clienții ordinari. Astfel cererile sunt de forma
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope
+    xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:ns2="urn:pcd">
+ <SOAP-ENV:Body SOAP-ENV:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <ns2:processImage>
+   <operation>0</operation>
+   <argument></argument>
+  </ns2:processImage>
+ </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>
+```
+unde tag-ul `argument` este opțional pentru operațiunile `FLIP` și `TAGS`. Pe lângă acest xml, clientul va trebui și să trimită un atașament MIME de tip `image/*` care să conțină imaginea asupra căreia dorim să efectuăm operațiunea. Id-ul atașametului nu este relevant, fiind luat în considerare primul atașament de tip imagine din lista de atașamente.
+
+Serverul va răspunde cu un xml de forma
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope
+    xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:ns2="urn:pcd">
+ <SOAP-ENV:Body SOAP-ENV:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <ns2:processImageResponse>
+   <result></result>
+  </ns2:processImageResponse>
+ </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>
+```
+unde în tag-ul `result`, pentru operațiunea de tip `TAGS` se vor afla cele 3 tag-uri asociate imaginii, delimitate de `;`, iar pentru celelalte operațiuni se va afla un mesaj de succes, alături de un atașament MIME cu ID-ul `processed_image` care va conține imaginea obținută în urma aplicării operațiunii.
