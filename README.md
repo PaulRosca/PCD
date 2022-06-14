@@ -1,4 +1,5 @@
 # PCD
+Autori: Roșca Paul & Nicolaescu David
 
 Proiectul conține:
 - Server UNIX, scris in C, platformă Linux, care se ocupă cu diverse operații de procesare de imagini. Fișier `server.c`
