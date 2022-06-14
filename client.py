@@ -20,8 +20,8 @@ def send_file(sock, filepath):
         data = f.read(1024)
     print("Done sending image!\n")
 def receive_file(sock, filename):
-    file_size = sock.recv(8)
-    file_size = struct.unpack('!L',file_size)
+    file_size = sock.recv(4)
+    file_size, = struct.unpack('!L',file_size)
     ext = sock.recv(6)
     ext = ext.split(b'\x00')[0]
     ext = str(ext, 'ascii', 'ignore')
